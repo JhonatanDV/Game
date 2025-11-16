@@ -42,6 +42,14 @@ export default class Prize {
         visual.position.sub(center)
 
         this.pivot.add(visual)
+        
+        // Aplicar escala al premio
+        // Para el portal, escala x25 (x5 del mundo * x5 adicional)
+        // Para otros premios (monedas), escala x5
+        const isPortal = role === 'finalPrize';
+        const scale = isPortal ? 10 : 3;
+        this.pivot.scale.set(scale, scale, scale);
+        
         this.scene.add(this.pivot)
 
         // OJO: Los cofres (role='chest') SÍ son visibles.

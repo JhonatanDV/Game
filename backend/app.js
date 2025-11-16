@@ -6,6 +6,7 @@ const cors = require('cors')
 const blockRoutes = require('./routes/blockRoutes')
 const authRoutes = require('./routes/authRoutes')
 const scoreRoutes = require('./routes/scoreRoutes')
+const levelConfigRoutes = require('./routes/levelConfigRoutes')
 
 const app = express()
 const port = process.env.PORT || 3001
@@ -21,6 +22,7 @@ app.get('/', (req, res) => {
             <li>/api/blocks - Gestión de bloques</li>
             <li>/api/auth - Autenticación (registro/login)</li>
             <li>/api/scores - Gestión de puntajes</li>
+            <li>/api/levels - Configuración de niveles</li>
         </ul>
         <p>Servidor corriendo en el puerto ${port}</p>
         `)
@@ -30,6 +32,7 @@ app.get('/', (req, res) => {
 app.use('/api/blocks', blockRoutes)
 app.use('/api/auth', authRoutes)
 app.use('/api/scores', scoreRoutes)
+app.use('/api/levels', levelConfigRoutes)
 
 mongoose.connect(process.env.MONGO_URI)
     .then(() => {

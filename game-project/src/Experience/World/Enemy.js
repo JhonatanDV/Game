@@ -6,14 +6,15 @@ import FinalPrizeParticles from '../Utils/FinalPrizeParticles.js'
 import Sound from './Sound.js'
 
 export default class Enemy {
-    constructor({ scene, physicsWorld, playerRef, model, position = new THREE.Vector3(), experience, debug = true }) {
+    constructor({ scene, physicsWorld, playerRef, model, position = new THREE.Vector3(), experience, debug = true, scale = 1.0 }) {
         this.experience = experience
         this.scene = scene
         this.physicsWorld = physicsWorld
         this.playerRef = playerRef
-        this.baseSpeed = 1.0
+        this.baseSpeed = 2.5 // Velocidad aumentada de 1.0 a 2.5
         this.speed = this.baseSpeed
         this.debug = debug
+        this.customScale = scale // Escala personalizada para enemigos especiales
 
         // Sonido de proximidad
         this.proximitySound = new Sound('/sounds/alert2.mp3', { loop: true, volume: 0 })
@@ -91,7 +92,9 @@ export default class Enemy {
         // Contenedor que seguirá la física
         // -------------------------------
         this.container = new THREE.Group()
-        this.container.scale.set(5, 5, 5)
+        // Aplicar escala personalizada (para giant_mutant será 5 * 3 = 15)
+        const finalScale = 3 * this.customScale;
+        this.container.scale.set(finalScale, finalScale, finalScale)
         this.container.position.copy(position)
         this.scene.add(this.container)
         this.container.add(this.model)
@@ -107,19 +110,51 @@ export default class Enemy {
             this.mixer = new THREE.AnimationMixer(this.model)
 
             const findClip = (names) => names.map(n => n.toLowerCase()).map(n => clips.find(c => c.name.toLowerCase() === n)).find(c => c)
-            const walkClip = findClip(['walk', 'walking', 'idle_walk', 'walkcycle', 'run']) || clips[0]
+            
+            // Buscar animaciones, evitando static pose
+            const runClip = findClip(['giant run', 'giantrun', 'run', 'running', 'sprint', 'attack', 'bite'])
+            const walkClip = findClip(['walk', 'walking', 'idle_walk', 'walkcycle', 'idle'])
+            const deathClip = findClip(['death', 'die', 'dying', 'dead'])
 
-            if (walkClip) {
-                const walkAction = this.mixer.clipAction(walkClip)
-                walkAction.setLoop(THREE.LoopRepeat)
-                walkAction.clampWhenFinished = false
-                walkAction.enabled = true
-                walkAction.play()
-                try { walkAction.setEffectiveWeight(0) } catch { walkAction.weight = 0 }
-                this.actions.walk = walkAction
+            // Filtrar clips que no sean static pose o T-pose
+            const validClips = clips.filter(c => {
+                const name = c.name.toLowerCase()
+                return !name.includes('static') && !name.includes('t-pose') && !name.includes('tpose') && !name.includes('bind')
+            })
+
+            // Configurar animación de movimiento (priorizar run, luego walk, luego cualquier válida)
+            let moveClip = runClip || walkClip
+            if (!moveClip && validClips.length > 0) {
+                // Si no encontramos run/walk, usar la primera animación válida que no sea death
+                moveClip = validClips.find(c => !c.name.toLowerCase().includes('death'))
             }
 
-            if (debug) console.log('[Enemy] Anim clips cargados:', clips.map(c => c.name))
+            if (moveClip) {
+                const moveAction = this.mixer.clipAction(moveClip)
+                moveAction.setLoop(THREE.LoopRepeat)
+                moveAction.clampWhenFinished = false
+                moveAction.enabled = true
+                // Activar con peso 1 inmediatamente para que se vea desde el inicio
+                try { moveAction.setEffectiveWeight(1) } catch { moveAction.weight = 1 }
+                moveAction.play()
+                this.actions.walk = moveAction
+                this.currentAction = moveAction // Establecer como acción actual
+                if (debug) console.log(`[Enemy] ✅ Usando animación: "${moveClip.name}" para movimiento`)
+            } else {
+                console.warn('[Enemy] ⚠️ No se encontró animación de movimiento válida')
+            }
+
+            // Configurar animación de death
+            if (deathClip) {
+                const deathAction = this.mixer.clipAction(deathClip)
+                deathAction.setLoop(THREE.LoopOnce)
+                deathAction.clampWhenFinished = true
+                deathAction.enabled = false
+                this.actions.death = deathAction
+                if (debug) console.log(`[Enemy] ✅ Animación death cargada: "${deathClip.name}"`)
+            }
+
+            if (debug) console.log('[Enemy] 📋 Clips disponibles:', clips.map(c => c.name).join(', '))
         }
 
         // Física
@@ -162,8 +197,40 @@ export default class Enemy {
         // Movimiento
         this.turnSpeed = 6.0
         this.moveThreshold = 0.5
+        this.isDying = false // Estado para controlar la animación de muerte
 
         if (debug) console.log('[Enemy] Inicializado OK. Pos:', position)
+    }
+
+    playDeath() {
+        if (this.isDying || !this.actions.death) return
+        this.isDying = true
+        
+        // Detener movimiento
+        if (this.body) {
+            this.body.velocity.set(0, 0, 0)
+            this.body.angularVelocity.set(0, 0, 0)
+        }
+        
+        // Reproducir animación de muerte
+        if (this.currentAction) {
+            this.currentAction.fadeOut(0.3)
+        }
+        
+        const deathAction = this.actions.death
+        deathAction.enabled = true
+        deathAction.reset()
+        deathAction.setLoop(THREE.LoopOnce)
+        deathAction.clampWhenFinished = true
+        try { deathAction.setEffectiveWeight(1) } catch { deathAction.weight = 1 }
+        deathAction.fadeIn(0.3)
+        deathAction.play()
+        this.currentAction = deathAction
+        
+        if (this.debug) console.log('[Enemy] Reproduciendo animación de muerte')
+        
+        // Detener sonido de proximidad
+        this.proximitySound?.stop()
     }
 
     _setAction(actionName, { fade = 0.18 } = {}) {
@@ -188,6 +255,13 @@ export default class Enemy {
 
         // Actualizar animación
         this.mixer?.update(delta)
+        
+        // Si está muriendo, solo actualizar animación y salir
+        if (this.isDying) {
+            this.container.position.copy(this.body.position)
+            this.model.position.set(0, 0, 0)
+            return
+        }
 
         const targetPos = this.playerRef.body.position
         const enemyPos = this.body.position
@@ -196,7 +270,7 @@ export default class Enemy {
         const dz = targetPos.z - enemyPos.z
         const dist2D = Math.hypot(dx, dz)
 
-        this.speed = dist2D < 4 ? 2.5 : this.baseSpeed
+        this.speed = dist2D < 4 ? 4.0 : this.baseSpeed // Velocidad de sprint aumentada
 
         const maxDistance = 10
         const clampedDistance = Math.min(dist2D, maxDistance)

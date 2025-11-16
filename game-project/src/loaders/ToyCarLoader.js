@@ -153,8 +153,10 @@ export default class ToyCarLoader {
             const model = glb.scene.clone();
             if (block.level === 2) {
                 model.scale.set(15, 15, 15); // Escala personalizada para nivel 2
+            } else if (block.level === 3) {
+                model.scale.set(5, 5, 5); // Escala x5 para nivel 3
             } else {
-                model.scale.set(5, 5, 5); // Nivel 1 y 3 mantienen escala x5
+                model.scale.set(5, 5, 5); // Nivel 1 escala x5
             }
             model.userData.levelObject = true;            // Eliminar cámaras y luces embebidas
             model.traverse((child) => {
@@ -211,8 +213,10 @@ export default class ToyCarLoader {
             // Ajustar altura según el nivel
             if (block.level === 2) {
                 model.position.y = 0; // Altura específica para nivel 2
+            } else if (block.level === 3) {
+                model.position.y = 0.1; // Altura específica para nivel 3
             } else {
-                if (block.level === 2) { model.position.y = 10; } else { model.position.y = 6; }; // Nivel 1 y 3 mantienen altura original
+                model.position.y = 6; // Altura para nivel 1
             }
             this.scene.add(model);            // Físicas (Solo para bloques estáticos)
             let shape;

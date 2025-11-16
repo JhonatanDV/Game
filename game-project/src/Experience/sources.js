@@ -37,6 +37,11 @@ export default [
         path: '/models/Zombie/Zombie.glb'
     },
     {
+        name: 'giantMutantModel',
+        type: 'gltfModel',
+        path: '/models/Zombie/giant_mutant.glb'
+    },
+    {
         name: 'coinModel',
         type: 'gltfModel',
         path: '/models/Coin/Coin.glb'

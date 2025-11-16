@@ -154,10 +154,10 @@ export default class World {
 		}
 	}
 
-	spawnEnemies(count = 3) {
+	spawnEnemies(count = 3, modelResource = null) {
 		if (!this.robot?.body) { if (this.debug) console.warn('spawnEnemies: robot no listo'); return }
-		const zombieResource = this.resources?.items?.zombieModel;
-		if (!zombieResource) { console.error('spawnEnemies: zombieModel no encontrado'); return }
+		const zombieResource = modelResource || this.resources?.items?.zombieModel;
+		if (!zombieResource) { console.error('spawnEnemies: modelo de enemigo no encontrado'); return }
 
 		this.enemies?.forEach(e => e?.destroy?.());
 		this.enemies = [];
@@ -187,6 +187,73 @@ export default class World {
 			this.enemies.push(enemy);
 		}
 		if (this.debug) console.log(`spawnEnemies: se crearon ${this.enemies.length} enemigos`);
+	}
+
+	spawnMixedEnemies(zombieCount = 4, giantCount = 1) {
+		if (!this.robot?.body) { if (this.debug) console.warn('spawnMixedEnemies: robot no listo'); return }
+		const zombieResource = this.resources?.items?.zombieModel;
+		const giantMutantResource = this.resources?.items?.giantMutantModel;
+		if (!zombieResource || !giantMutantResource) { 
+			console.error('spawnMixedEnemies: modelos no encontrados'); 
+			return 
+		}
+
+		this.enemies?.forEach(e => e?.destroy?.());
+		this.enemies = [];
+
+		const playerPos = this.robot.body.position;
+		const minRadius = 30;
+		const maxRadius = 60;
+
+		// Spawnear zombies normales
+		for (let i = 0; i < zombieCount; i++) {
+			const angle = (i / (zombieCount + giantCount)) * Math.PI * 2;
+			const radius = minRadius + Math.random() * (maxRadius - minRadius);
+			const x = playerPos.x + Math.cos(angle) * radius;
+			const z = playerPos.z + Math.sin(angle) * radius;
+			const y = playerPos.y ?? 1.5;
+			const spawnPos = new THREE.Vector3(x, y, z);
+
+			const enemy = new Enemy({
+				scene: this.scene,
+				physicsWorld: this.experience.physics?.world,
+				playerRef: this.robot,
+				model: zombieResource,
+				position: spawnPos,
+				experience: this.experience,
+				debug: this.debug
+			});
+			enemy.isGhost = false;
+			enemy.delayActivation = 0.5 + i * 0.3;
+			this.enemies.push(enemy);
+		}
+
+		// Spawnear giant mutants (3x más grandes)
+		for (let i = 0; i < giantCount; i++) {
+			const angle = ((zombieCount + i) / (zombieCount + giantCount)) * Math.PI * 2;
+			const radius = minRadius + Math.random() * (maxRadius - minRadius);
+			const x = playerPos.x + Math.cos(angle) * radius;
+			const z = playerPos.z + Math.sin(angle) * radius;
+			const y = (playerPos.y ?? 1.5) + 7.0; // +3.0 más alto para evitar que atraviese el suelo
+			const spawnPos = new THREE.Vector3(x, y, z);
+
+			const enemy = new Enemy({
+				scene: this.scene,
+				physicsWorld: this.experience.physics?.world,
+				playerRef: this.robot,
+				model: giantMutantResource,
+				position: spawnPos,
+				experience: this.experience,
+				debug: this.debug,
+				scale: 3.0 // 3x más grande que zombie normal
+			});
+			enemy.isGiantMutant = true;
+			enemy.isGhost = false;
+			enemy.delayActivation = 1.0 + i * 0.5;
+			this.enemies.push(enemy);
+		}
+
+		if (this.debug) console.log(`spawnMixedEnemies: ${zombieCount} zombies + ${giantCount} giant mutants creados`);
 	}
 
 	spawnIntelligentEnemies(count, speedMultiplier = 3.6) {
@@ -422,6 +489,7 @@ export default class World {
 		// Lógica para pasar de nivel al recoger el portal
 		prize.onCollect = async (collectedPrize) => {
 			if (this.isLoadingLevel) return;
+			console.log(`🌀 Portal recolectado. Nivel actual: ${this.levelManager?.currentLevel}, Role: ${collectedPrize.role}`);
 			try {
 				if (collectedPrize.role === "finalPrize") {
 					this.isLoadingLevel = true;
@@ -429,7 +497,8 @@ export default class World {
 					this.isLoadingLevel = false;
 				}
 			} catch (e) {
-				if (this.debug) console.warn('Error en prize.onCollect wrapper (Portal Cercano)', e);
+				console.error('❌ Error en prize.onCollect (Portal Cercano):', e);
+				this.isLoadingLevel = false;
 			}
 		};
 	}
@@ -470,23 +539,34 @@ export default class World {
 
 					if (window.userInteracted && this.coinSound) this.coinSound.play();
 					try {
-						this.collectedCoins = (this.collectedCoins || 0) + 1;
-						this._updateUI(); // Actualiza contador
+					this.collectedCoins = (this.collectedCoins || 0) + 1;
+					this._updateUI(); // Actualiza contador
 
-						if (this.debug) console.log('Monedas recogidas:', this.collectedCoins, 'role:', c.role);
-						
-						// Ya no hay monedas 'finalPrize', se elimina la lógica if (role === 'finalPrize')
+					if (this.debug) console.log('Monedas recogidas:', this.collectedCoins, 'role:', c.role);
+					
+					// Ya no hay monedas 'finalPrize', se elimina la lógica if (role === 'finalPrize')
 
-					if (this.levelManager && typeof this.levelManager.onCoinCollected === 'function') {
-						this.levelManager.onCoinCollected(c);
+				if (this.levelManager && typeof this.levelManager.onCoinCollected === 'function') {
+					this.levelManager.onCoinCollected(c);
+				}
+
+				// Crear portal cerca del jugador al alcanzar la décima moneda
+				if (!this._finalCoinMade && this.collectedCoins >= this.coinGoal) {
+					if (this.debug) console.log('Meta de monedas alcanzada -> Creando portal cerca del jugador');
+					
+					// Si estamos en nivel 3, reproducir animación de death en giant_mutants
+					if (this.levelManager?.currentLevel === 3) {
+						this.enemies?.forEach(enemy => {
+							if (enemy.isGiantMutant && typeof enemy.playDeath === 'function') {
+								enemy.playDeath();
+								if (this.debug) console.log('🧟 Giant Mutant ejecutando animación de muerte');
+							}
+						});
 					}
-
-					// Crear portal cerca del jugador al alcanzar la décima moneda
-					if (!this._finalCoinMade && this.collectedCoins >= this.coinGoal) {
-						if (this.debug) console.log('Meta de monedas alcanzada -> Creando portal cerca del jugador');
-						this.spawnFinalPrizeNearPlayer(); // <-- Crea el portal cerca del jugador
-						this._finalCoinMade = true;
-					}
+					
+					this.spawnFinalPrizeNearPlayer(); // <-- Crea el portal cerca del jugador
+					this._finalCoinMade = true;
+				}
 					} catch (e) { if (this.debug) console.warn('onCollect error', e) }
 				}
 			});
@@ -499,31 +579,36 @@ export default class World {
 
 	async _goToNextLevel() {
 		try {
+			console.log(`🎯 _goToNextLevel llamado. Nivel actual: ${this.levelManager.currentLevel}, Total niveles: ${this.levelManager.totalLevels}`);
+			
 			if (this.levelManager && this.levelManager.currentLevel < this.levelManager.totalLevels) {
 				const currentLevel = this.levelManager.currentLevel;
 				const nextLevelNum = currentLevel + 1;
-				if (this.debug) console.log(`_goToNextLevel: Pasando del nivel ${currentLevel} al nivel ${nextLevelNum}...`);
+				console.log(`➡️ Pasando del nivel ${currentLevel} al nivel ${nextLevelNum}...`);
 				try {
 					await this.levelManager.nextLevel();
-					if (this.debug) console.log(`_goToNextLevel: levelManager actualizado. Nuevo nivel: ${this.levelManager.currentLevel}`);
+					console.log(`✅ levelManager actualizado. Nuevo nivel: ${this.levelManager.currentLevel}`);
 					await this.loadLevel(nextLevelNum);
-					if (this.debug) console.log(`_goToNextLevel: loadLevel(${nextLevelNum}) completado.`);
+					console.log(`✅ loadLevel(${nextLevelNum}) completado.`);
 				} catch (e) {
-					if (this.debug) console.warn('levelManager.nextLevel o loadLevel fallo', e);
+					console.warn('❌ levelManager.nextLevel o loadLevel fallo', e);
 				}
 			} else {
-				if (this.debug) console.log('_goToNextLevel: Último nivel completado. Fin del juego.');
+				console.log('🏁 ¡Último nivel completado! Mostrando pantalla de fin del juego...');
 				// Lógica de "Ganaste" (Fin del juego)
 				if (this.experience && this.experience.tracker) {
+					console.log('📊 Deteniendo tracker y mostrando modal...');
 					const elapsed = this.experience.tracker.stop();
 					this.experience.tracker.saveTime(elapsed);
 					this.experience.tracker.showEndGameModal(elapsed);
-				} else if (this.debug) {
-					console.warn('_goToNextLevel: tracker no disponible');
+					console.log('✅ Modal de fin de juego mostrado');
+				} else {
+					console.warn('⚠️ tracker no disponible, mostrando alerta fallback');
+					alert('🏆 ¡Has completado todos los niveles!');
 				}
 			}
 		} catch (e) {
-			if (this.debug) console.warn('Error ejecutando lógica _goToNextLevel', e);
+			console.error('❌ Error ejecutando lógica _goToNextLevel:', e);
 		}
 	}
 
@@ -737,7 +822,7 @@ export default class World {
 
 	async loadLevel(level) {
     try {
-        if(this.debug) console.log(`--- Iniciando carga de Nivel ${level} ---`);
+        console.log(`🎮 ====== CARGANDO NIVEL ${level} ======`);
 
         // 1. LIMPIAR ESCENA ANTERIOR
         this.clearCurrentScene(); // Limpia objetos, física e intervalos
@@ -745,9 +830,25 @@ export default class World {
         // 2. CARGAR DATOS DEL NIVEL
         const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
         const apiUrl = `${backendUrl}/api/blocks?level=${level}`;
+        const configUrl = `${backendUrl}/api/levels/config?level=${level}`;
         let data;
+        let levelConfig = null;
 
         try {
+            // Intentar cargar configuración del nivel desde API
+            console.log(`🔍 Intentando cargar configuración desde: ${configUrl}`);
+            try {
+                const configRes = await fetch(configUrl);
+                if (configRes.ok) {
+                    levelConfig = await configRes.json();
+                    console.log(`✅ Configuración del nivel ${level} cargada desde API:`, levelConfig);
+                } else {
+                    console.log(`⚠️ API respondió con status ${configRes.status}`);
+                }
+            } catch (configError) {
+                console.log(`⚠️ Error al cargar configuración: ${configError.message}`);
+            }
+
             // Intenta cargar desde API
             const res = await fetch(apiUrl);
             if (!res.ok) throw new Error(`Error API (${res.status})`);
@@ -784,7 +885,7 @@ export default class World {
             // Define spawn points por defecto si no se encuentran en el JSON local
             if (!data.spawnPoint) {
                 // Usar las mismas coordenadas para todos los niveles
-                data.spawnPoint = { x: -10, y: 1.5, z: 0 };
+                data.spawnPoint = { x: -18, y: 1.5, z: 0 };
                  if (this.debug) console.log(`loadLevel: Usando spawnPoint por defecto para Nivel ${level}`);
             }
         }
@@ -806,16 +907,23 @@ export default class World {
         this.collectedChests = 0;
 
         // Establecer meta de monedas según el nivel
-        if (level == 1) {
-            this.coinGoal = 10;
-        } else if (level == 2) {
-            this.coinGoal = 15;
-        } else if (level == 3) {
-            this.coinGoal = 20;
+        // Primero intentar usar el valor de la configuración de la API
+        if (levelConfig && levelConfig.coinGoal) {
+            this.coinGoal = levelConfig.coinGoal;
+            console.log(`🎯 Meta de monedas desde API para Nivel ${level}: ${this.coinGoal}`);
         } else {
-            this.coinGoal = 10; // Fallback
+            // Fallback a valores hardcodeados si no hay configuración
+            if (level == 1) {
+                this.coinGoal = 10;
+            } else if (level == 2) {
+                this.coinGoal = 15;
+            } else if (level == 3) {
+                this.coinGoal = 20;
+            } else {
+                this.coinGoal = 10; // Fallback
+            }
+            console.log(`🎯 Meta de monedas (fallback) para Nivel ${level}: ${this.coinGoal}`);
         }
-        if(this.debug) console.log(`loadLevel: Meta de monedas para Nivel ${level} establecida en ${this.coinGoal}`);
 
         this._updateUI(); // Actualiza UI con contadores reseteados y meta correcta
 
@@ -866,19 +974,20 @@ export default class World {
                 else { clearInterval(this.coinSpawnInterval); this.coinSpawnInterval = null; }
             }, 10000);
             this.spawnIntelligentEnemies(3, 2.5); // 3 enemigos, velocidad x2.5
-        } else if (level == 2) {
-            if (this.debug) console.log("loadLevel: Configurando spawners para Nivel 2 (Monedas y 3 Enemigos Rápidos)");
+        } else if (level == 3) {
+            if (this.debug) console.log("loadLevel: Configurando spawners para Nivel 3 (Monedas, Zombies y Giant Mutants)");
             this.coinSpawnInterval = setInterval(() => {
-                if (this.levelManager.currentLevel == 2) { this.spawnCoin(3); }
+                if (this.levelManager.currentLevel == 3) { this.spawnCoin(3); }
                 else { clearInterval(this.coinSpawnInterval); this.coinSpawnInterval = null; }
             }, 10000);
-            this.spawnIntelligentEnemies(3, 2.5); // 3 enemigos, velocidad x2.5
+            this.spawnMixedEnemies(2, 1); // 2 zombies normales + 1 giant mutant
         } else {
              if (this.debug) console.log(`loadLevel: No hay configuración de spawners para Nivel ${level}`);
         }
 
         this.gameStarted = true; // Activa la lógica de update (derrota, etc.)
-        if (this.debug) console.log(`--- Nivel ${level} cargado exitosamente ---`);
+        console.log(`✅ ====== NIVEL ${level} CARGADO EXITOSAMENTE ======`);
+        console.log(`📊 Estado: ${this.collectedCoins}/${this.coinGoal} monedas`);
 
     } catch (error) {
         console.error(`❌ Error MUY GRAVE cargando nivel ${level}:`, error);
@@ -886,7 +995,7 @@ export default class World {
     }
   }
 
-	resetRobotPosition(spawn = { x: 0, y: 1.5, z: 0 }) { // Spawn por defecto más seguro
+	resetRobotPosition(spawn = { x: -15, y: 1.5, z: 0 }) { // Spawn por defecto más seguro
 		if (!this.robot?.body || !this.robot?.group) {
 			if(this.debug) console.warn('resetRobotPosition: No se pudo resetear, robot no listo.');
 			return;

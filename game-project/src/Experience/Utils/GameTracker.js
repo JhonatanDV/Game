@@ -59,9 +59,11 @@ export default class GameTracker {
         
         // 🎮 Obtener datos del juego para el sistema de puntajes
         const experience = window.experience
-        const coins = experience?.world?.menu?.coins || 0
+        const coins = experience?.world?.collectedCoins || 0
         const level = experience?.world?.levelManager?.currentLevel || 1
         const ranking = best.map((t, i) => `#${i + 1}: ${t}s`).join('\n')
+        
+        console.log('📊 Datos finales del juego:', { coins, level, time: currentTime })
 
         // 🔥 Disparar evento personalizado para React (sistema de puntajes)
         window.dispatchEvent(new CustomEvent('game-over', {
